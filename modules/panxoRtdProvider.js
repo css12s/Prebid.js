@@ -194,6 +194,12 @@ function onGetBidRequestData(reqBidsConfigObj, callback, config, userConsent) {
       mergeDeep(ortb2, { site: { ext: { data: { panxo: panxoData.site } } } });
     }
 
+    // Add user-level audience data (opaque, server-composed; provider is a
+    // dumb pipe: it constructs no ids and applies no caps).
+    if (panxoData.user && Object.keys(panxoData.user).length > 0) {
+      mergeDeep(ortb2, { user: panxoData.user });
+    }
+
     mergeDeep(reqBidsConfigObj.ortb2Fragments.global, ortb2);
     callback();
   }

@@ -228,6 +228,20 @@ describe('panxo RTD module', function () {
         .that.deep.equals(signalData.site);
     });
 
+    it('should pass through user-level audience data verbatim (constructs no ids)', () => {
+      load({ params: { siteId: validSiteId } });
+
+      const userData = { data: [{ name: 'panxo.ai', segment: [{ id: '1001' }] }] };
+      onImplMessage({ type: 'signal', data: { device: { v1: 'token' }, site: {}, user: userData } });
+      onGetBidRequestData(reqBidsConfig, callbackSpy, { params: {} }, {});
+
+      expect(callbackSpy.calledOnce).to.be.true;
+      expect(reqBidsConfig.ortb2Fragments.global).to.have.own.property('user');
+      // Provider is a dumb pipe: it merges user.data verbatim and builds no ids.
+      expect(reqBidsConfig.ortb2Fragments.global.user.data[0].segment[0].id).to.equal('1001');
+      expect(reqBidsConfig.ortb2Fragments.global.user).to.deep.equal(userData);
+    });
+
     it('should update panxo data when new signal is received', () => {
       load({ params: { siteId: validSiteId } });
 
