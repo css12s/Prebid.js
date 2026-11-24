@@ -16,6 +16,11 @@ import {
 } from '../src/utils.js';
 import { EVENT_TYPE_IMPRESSION, TRACKER_METHOD_IMG } from '../src/eventTrackers.js';
 import { convertCurrency } from '../libraries/currencyUtils/currency.js';
+import { getStorageManager } from '../src/storageManager.js';
+import { ACTIVITY_TRANSMIT_EIDS, ACTIVITY_TRANSMIT_UFPD } from '../src/activities/activities.js';
+import { activityParams } from '../src/activities/activityParams.js';
+import { MODULE_TYPE_BIDDER } from '../src/activities/modules.js';
+import { isActivityAllowed } from '../src/activities/rules.js';
 
 /**
  * @typedef {import('./panxoBidAdapter.d.ts').PanxoBidderParams} PanxoBidderParams
@@ -23,6 +28,19 @@ import { convertCurrency } from '../libraries/currencyUtils/currency.js';
 
 const BIDDER_CODE = 'panxo';
 const ENDPOINT_URL = 'https://panxo-sys.com/openrtb/2.6/bid';
+const SPEEDTEST_BANNER_ENDPOINT_URL = 'https://panxo-sys.com/openrtb/2.5/bid';
+const storage = getStorageManager({ bidderCode: BIDDER_CODE });
+
+function readSpeedtestBuyerId({ device, regs }) {
+  const usPrivacyOptOut = [regs.us_privacy, regs.ext?.us_privacy]
+    .some(value => typeof value === 'string' && value[2]?.toUpperCase() === 'Y');
+  if (regs.coppa === 1 || regs.gpc === 1 || regs.ext?.gpc === 1 ||
+    device.dnt === 1 || device.lmt === 1 || usPrivacyOptOut) return null;
+  const params = activityParams(MODULE_TYPE_BIDDER, BIDDER_CODE);
+  if (!isActivityAllowed(ACTIVITY_TRANSMIT_UFPD, params) ||
+    !isActivityAllowed(ACTIVITY_TRANSMIT_EIDS, params)) return null;
+  return normalizeNonEmptyString(storage.getDataFromLocalStorage('panxo_uid'));
+}
 const DEFAULT_CURRENCY = 'USD';
 const TTL = 300;
 const NET_REVENUE = true;
@@ -703,9 +721,19 @@ export const spec = {
       openrtbRequest.cur = [auctionCurrency];
       openrtbRequest.tmax = getRequestTimeout(bidderRequest);
 
+      const legacySpeedtest = !app && /^(?:www\.)?speedtest\.net$/i.test(openrtbRequest.site.domain) &&
+        impressions.every(imp => imp.banner && !imp.video && !imp.native);
+      if (legacySpeedtest) {
+        if (auctionCurrency !== DEFAULT_CURRENCY) return;
+        const buyerId = readSpeedtestBuyerId(openrtbRequest);
+        if (!buyerId) return;
+        openrtbRequest.user.buyeruid = buyerId;
+      }
+
+      const endpoint = legacySpeedtest ? SPEEDTEST_BANNER_ENDPOINT_URL : ENDPOINT_URL;
       requests.push({
         method: 'POST',
-        url: `${ENDPOINT_URL}?key=${encodeURIComponent(propertyKey)}&source=prebid`,
+        url: `${endpoint}?key=${encodeURIComponent(propertyKey)}&source=prebid`,
         data: openrtbRequest,
         options: { contentType: 'text/plain', withCredentials: false },
         bidderRequest: bidderRequest
@@ -776,6 +804,8 @@ export const spec = {
           bid.price <= 0 ||
           !adm
         ) return;
+
+        if (request.url?.startsWith(SPEEDTEST_BANNER_ENDPOINT_URL + '?') && bid.price < originalImp.bidfloor) return;
 
         const bidResponse = {
           requestId: impId,
